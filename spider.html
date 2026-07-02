@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-select=none">
+    <title>Spider-Man Direct Load</title>
+    <style>
+        * { box-sizing: border-box; user-select: none; -webkit-user-select: none; margin: 0; padding: 0; }
+        body { background: #000; overflow: hidden; font-family: sans-serif; height: 100vh; display: flex; justify-content: center; align-items: center; }
+        #gameContainer { position: relative; width: 100vw; height: 100vh; max-width: 800px; max-height: 450px; background: #020208; overflow: hidden; }
+        canvas { display: block; width: 100%; height: 100%; background: #050510; }
+        
+        .game-bar { position: absolute; top: 12px; font-family: monospace; font-size: 1rem; color: #fff; z-index: 10; font-weight: bold; background: rgba(0,0,0,0.6); padding: 4px 10px; border-radius: 4px; }
+        #healthDisplay { left: 12px; border-left: 3px solid #ff1e27; }
+        #scoreDisplay { right: 12px; border-right: 3px solid #00d2ff; }
+
+        #touchControls { position: absolute; bottom: 0; left: 0; width: 100%; height: 120px; z-index: 50; pointer-events: none; display: flex; justify-content: space-between; align-items: center; padding: 0 20px 15px 20px; }
+        .interactive-zone { pointer-events: auto; display: flex; align-items: center; justify-content: center; }
+        
+        #padBase { width: 85px; height: 85px; background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; position: relative; }
+        #padStick { width: 35px; height: 35px; background: #ff1e27; border-radius: 50%; position: absolute; top: 23px; left: 23px; box-shadow: 0 0 8px #ff1e27; }
+        
+        .action-flex { display: flex; gap: 12px; }
+        .trigger-btn { width: 65px; height: 65px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.4); font-weight: bold; font-size: 0.8rem; color: #fff; text-transform: uppercase; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; }
+        #swingAction { border-color: #00d2ff; background: rgba(0, 210, 255, 0.2); }
+        #shootAction { border-color: #ff1e27; background: rgba(255, 30, 39, 0.2); }
+    </style>
+</head>
+<body>
+
+    <div id="gameContainer">
+        <div id="healthDisplay" class="game-bar">HEALTH: 100</div>
+        <div id="scoreDisplay" class="game-bar">SCORE: 0</div>
+
+        <canvas id="canvasDisplay"></canvas>
+
+        <div id="touchControls">
+            <div class="interactive-zone">
+                <div id="padBase"><div id="padStick"></div></div>
+            </div>
+            <div class="interactive-zone action-flex">
+                <div id="swingAction" class="trigger-btn">Swing</div>
+                <div id="shootAction" class="trigger-btn">Shoot</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvasDisplay');
+        const ctx = canvas.getContext('2d');
+        const healthDisplay = document.getElementById('healthDisplay');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+
+        canvas.width = 800; canvas.height = 450;
+        let activeSim = true;
+        let score = 0;
+        const config = { gravity: 0.45, friction: 0.97 };
+        const keys = { left: false, right: false };
+
+        const hero = { x: 120, y: 220, vx: 0, vy: 0, rad: 14, hp: 100, attached: false, ax: 0, ay: 0, len: 0 };
+        let maps = []; let targets = []; let bolts = [];
+
+        function generateStage() {
+            maps = []; targets = []; bolts = [];
+            let cx = 0;
+            for (let i = 0; i < 20; i++) {
+                let w = 130 + Math.random() * 70;
+                let h = 160 + Math.random() * 150;
+                maps.push({ x: cx, y: canvas.height - h, w: w, h: h });
+                if (i > 1 && Math.random() > 0.4) {
+                    targets.push({ x: cx + w/2, y: 70 + Math.random() * 90, rad: 12, vx: 1.5, range: 45, originX: cx + w/2 });
+                }
+                cx += w + 65;
+            }
+        }
+
+        const pBase = document.getElementById('padBase');
+        const pStick = document.getElementById('padStick');
+
+        function steerProcess(clientX) {
+            const bound = pBase.getBoundingClientRect();
+            const center = bound.left + bound.width / 2;
+            const delta = clientX - center;
+            if (Math.abs(delta) > 8) {
+                if (delta < 0) { keys.left = true; keys.right = false; pStick.style.transform = 'translateX(-16px)'; }
+                else { keys.right = true; keys.left = false; pStick.style.transform = 'translateX(16px)'; }
+            }
+        }
+
+        pBase.addEventListener('touchstart', (e) => steerProcess(e.touches[0].clientX));
+        pBase.addEventListener('touchmove', (e) => steerProcess(e.touches[0].clientX));
+        pBase.addEventListener('touchend', () => { keys.left = false; keys.right = false; pStick.style.transform = 'none'; });
+
+        document.getElementById('swingAction').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (!hero.attached) {
+                hero.ax = hero.x + 60; hero.ay = 30;
+                let dx = hero.ax - hero.x; let dy = hero.ay - hero.y;
+                hero.len = Math.sqrt(dx*dx + dy*dy); hero.attached = true;
+            } else { hero.attached = false; }
+        });
+
+        document.getElementById('shootAction').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            bolts.push({ x: hero.x, y: hero.y, vx: 8.5, vy: -0.5, rad: 4 });
+        });
+
+        function coreUpdate() {
+            if (keys.left) hero.vx -= 0.35;
+            if (keys.right) hero.vx += 0.35;
+
+            if (hero.attached) {
+                let dx = hero.x - hero.ax; let dy = hero.y - hero.ay;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist > hero.len) {
+                    let nx = dx / dist; let ny = dy / dist;
+                    hero.x = hero.ax + nx * hero.len; hero.y = hero.ay + ny * hero.len;
+                    let dot = hero.vx * nx + hero.vy * ny;
+                    hero.vx -= dot * nx; hero.vy -= dot * ny;
+                }
+            }
+
+            hero.vy += config.gravity; hero.vx *= config.friction; hero.vy *= config.friction;
+            hero.x += hero.vx; hero.y += hero.vy;
+
+            if (hero.x > 280) {
+                let shift = hero.x - 280; hero.x = 280;
+                maps.forEach(m => m.x -= shift);
+                targets.forEach(t => { t.x -= shift; t.originX -= shift; });
+                bolts.forEach(b => b.x -= shift);
+                if (hero.attached) hero.ax -= shift;
+            }
+
+            maps.forEach(m => {
+                if (hero.x + hero.rad > m.x && hero.x - hero.rad < m.x + m.w && hero.y + hero.rad > m.y) {
+                    hero.y = m.y - hero.rad; hero.vy = 0;
+                }
+            });
+
+            bolts.forEach((b, bIdx) => {
+                b.x += b.vx; b.y += b.vy;
+                targets.forEach((t, tIdx) => {
+                    if (Math.sqrt((b.x - t.x)**2 + (b.y - t.y)**2) < b.rad + t.rad) {
+                        bolts.splice(bIdx, 1); targets.splice(tIdx, 1);
+                        score += 100; scoreDisplay.textContent = `SCORE: ${score}`;
+                    }
+                });
+            });
+
+            targets.forEach(t => {
+                t.x += t.vx; if (Math.abs(t.x - t.originX) > t.range) t.vx *= -1;
+                if (Math.sqrt((hero.x - t.x)**2 + (hero.y - t.y)**2) < hero.rad + t.rad) {
+                    hero.hp -= 0.5; healthDisplay.textContent = `HEALTH: ${Math.max(0, Math.floor(hero.hp))}`;
+                }
+            });
+
+            if (hero.y > canvas.height || hero.hp <= 0) {
+                hero.x = 120; hero.y = 220; hero.vx = 0; hero.vy = 0; hero.hp = 100; hero.attached = false;
+                healthDisplay.textContent = "HEALTH: 100"; generateStage();
+            }
+        }
+
+        function frameRender() {
+            ctx.fillStyle = '#050512'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            maps.forEach(m => {
+                ctx.fillStyle = '#111122'; ctx.fillRect(m.x, m.y, m.w, m.h);
+                ctx.strokeStyle = '#22223b'; ctx.strokeRect(m.x, m.y, m.w, m.h);
+            });
+            if (hero.attached) {
+                ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(hero.x, hero.y); ctx.lineTo(hero.ax, hero.ay); ctx.stroke();
+            }
+            ctx.fillStyle = '#ff1e27'; ctx.beginPath(); ctx.arc(hero.x, hero.y, hero.rad, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#0066ff'; ctx.fillRect(hero.x - 5, hero.y - 2, 10, 7);
+            targets.forEach(t => { ctx.fillStyle = '#00ff66'; ctx.beginPath(); ctx.arc(t.x, t.y, t.rad, 0, Math.PI * 2); ctx.fill(); });
+            bolts.forEach(b => { ctx.fillStyle = '#00d2ff'; ctx.beginPath(); ctx.arc(b.x, b.y, b.rad, 0, Math.PI * 2); ctx.fill(); });
+        }
+
+        function engineLoop() {
+            if (!activeSim) return;
+            coreUpdate(); frameRender(); requestAnimationFrame(engineLoop);
+        }
+
+        generateStage();
+        engineLoop();
+    </script>
+</body>
+</html>
