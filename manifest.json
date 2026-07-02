@@ -1,9 +1,22 @@
 {
   "name": "Spider-Man Game",
-  "short_name": "Spider-Man",
+  "short_name": "Spider-Man", 
+  "description": "Swing and shoot webs as Spider-Man",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#000",
   "theme_color": "#ff0000",
-  "icons": []
+  "scope": "./",
+  "icons": [
+    {
+      "src": "https://placehold.co/192x192/ff0000/ffffff?text=SM",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://placehold.co/512x512/ff0000/ffffff?text=SM", 
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
 }
